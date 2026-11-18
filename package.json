@@ -1,0 +1,20 @@
+{
+  "name": "scaleboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Isometric diagram studio for system design and network diagrams, with animated packets and step-through presentations.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test",
+    "docs": "node scripts/gen-docs.mjs"
+  },
+  "devDependencies": {
+    "vite": "^8.3.8"
+  },
+  "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.3.0"
+  }
+}

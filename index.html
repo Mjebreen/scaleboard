@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Scaleboard — isometric diagram studio</title>
+    <meta name="description" content="Draw system design and network diagrams as isometric blocks, watch packets travel between them, and step through the design like a talk." />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <script>
+      // apply the saved theme before first paint so the page never flashes
+      try {
+        var t = localStorage.getItem('scaleboard:theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <header class="bar">
+      <div class="brand">
+        <svg viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M10 18.5 32 31l22-12.5L32 6z" fill="#d6e6f8" />
+          <path d="M10 18.5V43.5L32 58V31z" fill="#b9d3f1" />
+          <path d="M32 31v27l22-14.5v-25z" fill="#a2c2e8" />
+          <path d="M10 18.5 32 31l22-12.5M32 31v27" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="2.5" stroke-linecap="round" />
+          <path d="M32 6 54 18.5v25L32 58 10 43.5v-25z" fill="none" stroke="#2b2723" stroke-width="4.5" stroke-linejoin="round" />
+        </svg>
+        <span>Scale<b>board</b></span>
+      </div>
+      <input id="docName" class="docname edit-only" aria-label="Diagram name" spellcheck="false" maxlength="80" />
+      <span class="doctitle" id="docTitle"></span>
+      <span class="badge" id="viewBadge" title="This diagram was shared with you. You can look and step through it, but not change it.">View only</span>
+
+      <div class="seg edit-only" id="tools" role="group" aria-label="Tools">
+        <button type="button" data-tool="select" title="Select and move (V)">
+          <svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-2 6z" /></svg>Select
+        </button>
+        <button type="button" data-tool="connect" title="Drag from one block to another (C)">
+          <svg viewBox="0 0 24 24"><circle cx="5" cy="18" r="2.5" /><circle cx="19" cy="6" r="2.5" /><path d="M7 16c4-1 6-3 10-8" /></svg>Connect
+        </button>
+        <button type="button" data-tool="trace" title="Send a packet from one block to another (P)">
+          <svg viewBox="0 0 24 24"><path d="M3 12h13M12 6l6 6-6 6" /><path d="M21 5v14" /></svg>Send packet
+        </button>
+      </div>
+
+      <div class="grp-btn edit-only">
+        <button type="button" class="btn icon" id="undo" title="Undo (Ctrl+Z)" aria-label="Undo">
+          <svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5M4 12h10a6 6 0 0 1 0 12" transform="translate(0 -3)" /></svg>
+        </button>
+        <button type="button" class="btn icon" id="redo" title="Redo (Ctrl+Y)" aria-label="Redo">
+          <svg viewBox="0 0 24 24"><path d="M15 7l5 5-5 5M20 12H10a6 6 0 0 0 0 12" transform="translate(0 -3)" /></svg>
+        </button>
+      </div>
+
+      <span class="grow"></span>
+
+      <button type="button" class="btn" id="flow" title="Play or pause the packets (Space)">Pause</button>
+
+      <details class="menu edit-only" id="exMenu">
+        <summary class="btn">Examples</summary>
+        <div class="pop" id="exList"></div>
+      </details>
+
+      <details class="menu edit-only" id="fileMenu">
+        <summary class="btn">File</summary>
+        <div class="pop">
+          <button type="button" id="newDoc">New diagram</button>
+          <button type="button" id="openJson">Import file…<small>a .sb diagram an AI wrote, or a saved .json</small></button>
+          <button type="button" id="saveJson">Save as file</button>
+          <hr />
+          <button type="button" id="openCode">Diagram code…<small>write or paste a diagram as text</small></button>
+          <button type="button" id="tidy">Tidy layout<small>arrange the blocks in rows that follow the arrows</small></button>
+        </div>
+      </details>
+
+      <details class="menu edit-only" id="shareMenu">
+        <summary class="btn">Share</summary>
+        <div class="pop">
+          <button type="button" id="shareLink">View-only link…<small>opens with editing switched off</small></button>
+          <button type="button" id="exportHtml">Animated web page<small>one .html file that plays anywhere</small></button>
+          <button type="button" id="exportPdf">PDF<small>one page per step</small></button>
+          <hr />
+          <button type="button" id="exportPng">PNG image</button>
+          <button type="button" id="exportSvg">SVG image</button>
+        </div>
+      </details>
+
+      <button type="button" class="btn icon" id="theme" title="Light or dark" aria-label="Switch theme">
+        <svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.500 10.500z" /></svg>
+      </button>
+      <button type="button" class="btn primary" id="present" title="Step through the diagram full screen">Present</button>
+    </header>
+
+    <main class="work">
+      <aside class="panel lib" id="lib" aria-label="Component library"></aside>
+
+      <section class="mid">
+        <div class="panel stage" id="stage">
+          <svg id="scene" class="scene" aria-label="Diagram canvas">
+            <style id="sceneCss"></style>
+            <defs>
+              <pattern id="gridp" patternUnits="userSpaceOnUse"><path class="gridl" /></pattern>
+              <radialGradient id="fadeg">
+                <stop offset=".3" stop-color="#fff" />
+                <stop offset="1" stop-color="#fff" stop-opacity="0" />
+              </radialGradient>
+              <mask id="fade" maskUnits="userSpaceOnUse" x="0" y="0" width="100%" height="100%">
+                <rect id="fader" width="100%" height="100%" fill="url(#fadeg)" />
+              </mask>
+              <filter id="soft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="5" /></filter>
+            </defs>
+            <rect class="bg" id="bgr" width="100%" height="100%" />
+            <g mask="url(#fade)">
+              <g id="gridg"><rect id="gridr" x="-8000" y="-8000" width="16000" height="16000" fill="url(#gridp)" /></g>
+            </g>
+            <g id="vp">
+              <g id="content">
+                <g id="lzones"></g>
+                <g id="ledges"></g>
+                <g id="lpackets"></g>
+                <g id="lnodes"></g>
+                <g id="lover"></g>
+                <g id="ltrace"></g>
+              </g>
+              <g id="lui" class="ui"></g>
+              <g id="lprev" class="ui"></g>
+            </g>
+          </svg>
+
+          <div class="legend" id="legend"></div>
+          <div class="hud" id="hud" hidden></div>
+          <div class="dropnote">Drop the file to import it</div>
+          <div class="zoom">
+            <button type="button" class="btn icon sm" id="zout" aria-label="Zoom out">−</button>
+            <button type="button" class="btn sm" id="zfit" title="Fit the diagram (F)">Fit</button>
+            <button type="button" class="btn icon sm" id="zin" aria-label="Zoom in">+</button>
+          </div>
+        </div>
+
+        <div class="panel steps edit-only" id="steps"></div>
+      </section>
+
+      <aside class="panel insp" id="insp" aria-label="Properties"></aside>
+
+      <aside class="panel pcard" id="pcard" aria-label="Presentation">
+        <div class="prow">
+          <span class="k" id="pcount"></span>
+          <button type="button" class="btn sm" id="pexit" title="Leave presentation (Esc)">Exit</button>
+        </div>
+        <h2 id="ptitle"></h2>
+        <p id="ptext"></p>
+        <div class="pdots" id="pdots"></div>
+        <div class="prow pnav">
+          <button type="button" class="btn" id="pback">← Back</button>
+          <button type="button" class="btn primary" id="pnext">Next →</button>
+        </div>
+        <p class="dim keys">← → to step · Esc to leave</p>
+      </aside>
+    </main>
+
+    <input type="file" id="file" accept=".sb,.txt,.md,.json,application/json,text/plain,text/markdown" hidden />
+    <input type="file" id="codeFile" accept=".sb,.txt,.md,text/plain,text/markdown" hidden />
+
+    <dialog class="dlg" id="codeDlg" aria-labelledby="codeTitle">
+      <div class="dh">
+        <h2 id="codeTitle">Diagram code</h2>
+        <button type="button" class="btn sm" data-close>Close</button>
+      </div>
+      <p class="dim">This is the board written as text. Edit it, or paste a diagram that you or an AI wrote, then apply it. You can paste a whole AI reply: only the code block in it is read.</p>
+      <textarea id="codeText" spellcheck="false" autocapitalize="off" aria-label="Diagram code"></textarea>
+      <div class="msg" id="codeMsg" aria-live="polite"></div>
+      <div class="drow">
+        <button type="button" class="btn primary" id="codeApply">Apply to board</button>
+        <button type="button" class="btn" id="codeOpen">Open file…</button>
+        <button type="button" class="btn" id="codeCopy">Copy</button>
+        <button type="button" class="btn" id="codeSave">Save .sb file</button>
+        <button type="button" class="btn" id="codeErrCopy" hidden title="Copy the list of problems, to send back to the AI that wrote the diagram">Copy problems</button>
+      </div>
+      <div class="aibox">
+        <span class="k">Have an AI draw it</span>
+        <p class="dim">Give any AI model the language guide, then describe the system you want. Paste what it writes into the box above.</p>
+        <div class="drow">
+          <button type="button" class="btn sm" id="guideCopy">Copy the guide</button>
+          <button type="button" class="btn sm" id="guideSave">Download LANGUAGE.md</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog class="dlg small" id="shareDlg" aria-labelledby="shareTitle">
+      <div class="dh">
+        <h2 id="shareTitle">View-only link</h2>
+        <button type="button" class="btn sm" data-close>Close</button>
+      </div>
+      <p>Whoever opens this link sees the diagram and can step through it. The editing tools are switched off.</p>
+      <div class="drow">
+        <input type="text" id="shareUrl" readonly aria-label="Link" />
+        <button type="button" class="btn primary" id="shareCopy">Copy link</button>
+      </div>
+      <p class="warnbox" id="shareLocal" hidden>This link points at <b>this computer</b>, so it only opens here. To send it to someone else, put Scaleboard on a web address first, or send the animated web page instead.</p>
+      <p class="dim">The diagram travels inside the link, so it is a snapshot: change the board and you need a new link. View-only hides the tools; it is not a lock on the content. Your own board cannot be changed through it.</p>
+    </dialog>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <noscript>Scaleboard needs JavaScript to run.</noscript>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
